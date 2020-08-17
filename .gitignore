@@ -1,2 +1,9 @@
 nodemon.json
 node_modules
+._.DS_Store
+._nodemon.json
+._package.json
+._package-lock.json
+._server.js
+._app.js
+._Procfile

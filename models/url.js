@@ -13,7 +13,8 @@ const urlSchema = mongoose.Schema({
     created: {
       type: Date,
       default: Date.now()
-    }
+    },
+    likes: { type: Number, default: 0},
 })
 
 module.exports = mongoose.model('UrlData', urlSchema,'url');

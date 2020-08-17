@@ -7,8 +7,7 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const urlExist = require("url-exist");
 const crypto = require("crypto");
-
-const urlData = require("./models/url");
+const User = require("./models/user");
 // Node Mailer Setup
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -18,8 +17,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 const app = express();
-
-const User = require("./models/user");
 
 app.use(cors());
 app.use((req, res, next) => {
@@ -64,41 +61,68 @@ const jwtProtect = async (req, res, next) => {
 
 /** API For Application */
 // Check URL exist
+function checkExist(url) {
+  const exits = urlExist(url);
+  return exits;
+}
 app.post("/api/v1/checkurl", async (req, res, next) => {
   const url = req.body.url;
-  const exits = await urlExist(url);
-  console.log(exits);
+  const bool = checkExist(url);
+  if (bool === true) {
+    res.status(200).json({
+      message: "User exist",
+    });
+  } else {
+    res.status(400).json({
+      message: "User does not exist",
+    });
+  }
 });
 
-// Post Request - email, url
-app.post("/api/v1/url", jwtProtect, async (req, res, next) => {
+// Get User Request
+app.post("/api/v1/getbyId", async (req, res, next) => {
+  const heyId = req.body.userId;
+  const user = await User.findOne({ _id: heyId });
+  res.status(200).json({
+    message: "userdata",
+    result: user,
+  });
+});
+// Post Request - email, url - Add URL to database
+app.post("/api/v1/addUrl", async (req, res, next) => {
   try {
-    const email = req.body.email;
-    const user = await User.findOne({ email });
-    const postedId = user._id;
+    const postedId = req.body.userId;
     const urlLink = req.body.url;
+    const user =await  User.findOne({ _id: postedId});
     const exits = await urlExist(urlLink);
     console.log(exits);
-    if (exits === false) {
+    if (!user || exits === false) {
       return res.status(400).json({
-        message: "URL Invalid",
+        message: "User doesn't exist or URL Invalid",
       });
     }
     const randomStr = Math.random().toString(36).substring(7);
     const shortenUrl = `${process.env.SHORT_URL}/${randomStr}`;
-    const count = 0;
-    const urldata = await new urlData({
+    const url = await user.urls;
+    // console.log(url);
+    const urlData = {
       url: urlLink,
       shrinked: shortenUrl,
-      postedBy: postedId,
-      click: count,
+    };
+
+    const urldata = await User.findByIdAndUpdate(postedId, {
+      $addToSet: { urls: urlData },
     });
-    urldata.save().then((result) => {
-      res.status(201).json({
-        message: "data recieved",
-        result: result,
+    console.log(urldata);
+    if (!urlData) {
+      res.status(400).json({
+        message: "User doesn't exist.",
       });
-    });
+    } else {
+      res.status(200).json({
+        message: "Url created",
+      });
+    }
   } catch (err) {
     console.log(err);
     res.status(500).json({
@@ -106,65 +130,79 @@ app.post("/api/v1/url", jwtProtect, async (req, res, next) => {
     });
   }
 });
+// Selected URL
+app.post("/api/v1/fetchOne", jwtProtect, async (req, res, next) => {
+  try {
+    const userId = req.body.id;
+    const url = req.body.url;
+    const user = await User.findOne({
+      _id: userId,
+    });
+    const result = user.urls.filter((l) => l.url === url);
+    console.log(result);
+    if (result) {
+      res.status(200).json({
+        result,
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    res.status(400).json({
+      result: "Error occured",
+    });
+  }
+});
 // Get all urls for a User
-app.post("/api/v1/fetchAll", jwtProtect, async (req, res, next) => {
+app.post("/api/v1/fetchAll", async (req, res, next) => {
   const email = req.body.email;
   const user = await User.findOne({ email });
-  const Id = user._id;
-  const Urls = await urlData.find({ postedBy: Id }, (err, result) => {
-    if (err) {
-      res.status(500).json({ message: "error in fetching data" });
-    }
-    res.status(200).json({
-      data: result,
-    });
+  if (!user) {
+    res.status(500).json({ message: "error in fetching data" });
+  }
+  res.status(200).json({
+    data: user,
   });
 });
 
 // Create Custome Path - Required - email,old - oldURl, customepath -
 app.put("/api/v1/customeurl", jwtProtect, async (req, res, next) => {
-  const email = req.body.email;
-  const UserData = await User.findOne({ email });
-  const custome = `${process.env.SHORT_URL}/${req.body.customepath}`;
-  const oldLink = req.body.old;
-  const Urldata = await urlData.findOne({
-    postedBy: UserData._id,
-    url: oldLink,
-  });
-  // console.log(Urldata);
-  if (!Urldata) {
-    res
-      .status(500)
-      .json({ message: "URL Does not exist. Please create first" });
+  try {
+    const email = req.body.email;
+    const customeURL = req.body.customepath;
+    const oldLink = req.body.old;
+    const custome = `${process.env.SHORT_URL}/${customeURL}`;
+    console.log(custome);
+    const user = await User.findOne({ email });
+    user.urls.map((u) => {
+      if (u.url === oldLink) {
+        //mconsole.log(u.url);
+        const idx = +user.urls.indexOf(u);
+        user.urls[idx].set('shrinked', custome)
+        user.save().then((result) => {
+          res.status(200).json({
+            message: "saved",
+            object: u,
+          });
+        });
+      }
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(400).json({
+      message: "Error in custome url conversion",
+      err
+    })
   }
-  const updateData = await urlData.updateOne(
-    { postedBy: UserData._id, url: oldLink },
-    { $set: { shrinked: custome } }
-  );
-  const URLRec = await urlData.findOne(
-    {
-      postedBy: UserData._id,
-      url: oldLink,
-    },
-    (err, info) => {
-      if (err) throw error;
-      res.status(200).json({
-        message: "Custome URL created",
-        info,
-      });
-    }
-  );
 });
-
+// Get Long URL
 
 // Redirect Shorted URL
 app.put("/api/v1/:key", jwtProtect, async (req, res, next) => {
   try {
     const email = req.body.email;
-    const user = await User.findOne({email});
-    const postedBy = user._id;
+    const user = await User.findOne({ email });
     const shortUrl = `${process.env.SHORT_URL}/${req.params.key}`;
-    const Urldata = await urlData.findOne({ postedBy , shrinked: shortUrl });
+    const Urldata = await user.urls.shrinked.indexOf(sho);
     console.log(Urldata);
     let updatedCount = Urldata.click + 1;
     const updateDB = await urlData.updateOne(
@@ -178,7 +216,6 @@ app.put("/api/v1/:key", jwtProtect, async (req, res, next) => {
     } else {
       // res.status(200).json({ message: "Redirecting" });
       res.redirect(301, Urldata.url);
-
     }
   } catch (err) {
     console.log(err);
@@ -189,7 +226,7 @@ app.put("/api/v1/:key", jwtProtect, async (req, res, next) => {
 app.post("/api/v1/signup", async (req, res, next) => {
   let name = req.body.name;
   let email = req.body.email;
-  let password = Buffer.from(req.body.password, "base64").toString();
+  let password = req.body.password;
   const data = await User.findOne({ email });
   const token = crypto.randomBytes(32).toString("hex");
   const time = 2 * 60 * 60 * 1000;
@@ -213,7 +250,7 @@ app.post("/api/v1/signup", async (req, res, next) => {
 
             subject: "Sign Up successful",
             html: `<h1>Hi</h1> <p>Thank you for signup up.  To confirm follow the
-            link <a href="${process.env.BASE_URL}api/v1/verifyaccount/${token}">${process.env.BASE_URL}api/v1/verifyaccount/${token}</a></p>`,
+            link <a href="$${process.env}{process.env.BASE_URL}api/v1/verifyaccount/${token}">${process.env.BASE_URL}api/v1/verifyaccount/${token}</a></p>`,
             function(err, info) {
               if (err) {
                 res.status(500).json({
@@ -248,7 +285,7 @@ app.post("/api/v1/signup", async (req, res, next) => {
 });
 
 // Account activation
-app.put("/api/v1/verifyaccount/:token", async (req, res) => {
+app.get("/api/v1/verifyaccount/:token", async (req, res) => {
   const token = req.params.token;
   const time = new Date();
   const user = await User.findOne({
@@ -272,7 +309,7 @@ app.put("/api/v1/verifyaccount/:token", async (req, res) => {
   });
 });
 
-// Login
+//  Login 
 app.post("/api/v1/login", async (req, res, next) => {
   let fetchData;
   User.findOne({ email: req.body.email }).then((user) => {
@@ -282,7 +319,7 @@ app.post("/api/v1/login", async (req, res, next) => {
       });
     }
     fetchData = user;
-    let password = Buffer.from(req.body.password, "base64").toString();
+    let password = req.body.password;
     return bcrypt
       .compare(password, user.password)
       .then((result) => {
@@ -299,6 +336,7 @@ app.post("/api/v1/login", async (req, res, next) => {
         res.status(200).json({
           token,
           expiresIn: 3600,
+          userEmail: fetchData.email,
           userId: fetchData._id,
         });
       })
@@ -344,7 +382,21 @@ app.put("/api/v1/forgot", async (req, res, next) => {
     },
   });
 });
-
+//likes
+app.put("api/v1/likes", async (req, res, next) => {
+  const urlId = req.body.id;
+  const count = +req.body.count;
+  const url = await urlData.findByIdAndUpdate(urlId, { likes: count });
+  if (url.isModified > 0) {
+    res.status(200).json({
+      message: "Like updated",
+    });
+  } else {
+    res.status(400).json({
+      message: "Error in updates",
+    });
+  }
+});
 // Reset password route
 app.put("/api/v1/resetpass/:token", async (req, res, next) => {
   const token = req.params.token;
@@ -374,5 +426,24 @@ app.put("/api/v1/resetpass/:token", async (req, res, next) => {
     userUpdate,
   });
 });
+
+// Delete Account
+app.delete('/api/v1/:userId',jwtProtect, async(req,res,next) => {
+  User.deleteOne({_id:req.params.userId})
+  .exec()
+  .then(result => {
+    console.log(result);
+    res.status(200).json({
+      message: "User deleted"
+    });
+  })
+  .catch(err => {
+    console.log(err);
+    res.status(500).json({
+      error: err
+    });
+  });
+});
+
 
 module.exports = app;
